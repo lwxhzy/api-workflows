@@ -30,7 +30,28 @@ jobs:
       - name: Export OpenAPI spec
         run: ${{ inputs.export-command }}
 
+      # ── Spec 变更检测 ──
+      - name: Compute spec hash
+        id: spec-hash
+        run: |
+          HASH=$(sha256sum openapi.json | cut -d' ' -f1)
+          echo "hash=$HASH" >> "$GITHUB_OUTPUT"
+          echo "Spec hash: $HASH"
+
+      - name: Check cache
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: .spec-hash-marker
+          key: apifox-spec-${{ steps.spec-hash.outputs.hash }}
+
+      - name: Spec unchanged
+        if: steps.cache.outputs.cache-hit == 'true'
+        run: echo "OpenAPI spec unchanged, skipping sync"
+
+      # ── 同步到 Apifox ──
       - name: Sync to Apifox
+        if: steps.cache.outputs.cache-hit != 'true'
         run: |
           RESPONSE=$(jq -n --arg spec "$(cat openapi.json)" '{
             input: $spec,
@@ -60,4 +81,5 @@ jobs:
             exit 1
           fi
 
+          echo "${{ steps.spec-hash.outputs.hash }}" > .spec-hash-marker
           echo "Sync completed successfully"
