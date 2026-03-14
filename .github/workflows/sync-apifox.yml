@@ -16,6 +16,8 @@ on:
         required: true
       APIFOX_PROJECT_ID:
         required: true
+      FEISHU_WEBHOOK:
+        required: false
 
 jobs:
   sync:
@@ -83,3 +85,86 @@ jobs:
 
           echo "${{ steps.spec-hash.outputs.hash }}" > .spec-hash-marker
           echo "Sync completed successfully"
+
+      # ── 飞书通知 ──
+      - name: Notify Feishu (success)
+        if: success() && steps.cache.outputs.cache-hit != 'true' && env.FEISHU_WEBHOOK != ''
+        env:
+          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+        run: |
+          curl -s -X POST "$FEISHU_WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n \
+              --arg repo "${{ github.repository }}" \
+              --arg ref "${{ github.ref_name }}" \
+              --arg sha "${{ github.sha }}" \
+              --arg actor "${{ github.actor }}" \
+              --arg url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            '{
+              msg_type: "interactive",
+              card: {
+                header: {
+                  title: { tag: "plain_text", content: "Apifox 同步成功" },
+                  template: "green"
+                },
+                elements: [
+                  {
+                    tag: "div",
+                    text: {
+                      tag: "lark_md",
+                      content: "**仓库**：\($repo)\n**分支**：\($ref)\n**提交**：\($sha | .[:8])\n**操作人**：\($actor)"
+                    }
+                  },
+                  {
+                    tag: "action",
+                    actions: [{
+                      tag: "button",
+                      text: { tag: "plain_text", content: "查看详情" },
+                      url: $url,
+                      type: "primary"
+                    }]
+                  }
+                ]
+              }
+            }')"
+
+      - name: Notify Feishu (failure)
+        if: failure() && env.FEISHU_WEBHOOK != ''
+        env:
+          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+        run: |
+          curl -s -X POST "$FEISHU_WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n \
+              --arg repo "${{ github.repository }}" \
+              --arg ref "${{ github.ref_name }}" \
+              --arg sha "${{ github.sha }}" \
+              --arg actor "${{ github.actor }}" \
+              --arg url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            '{
+              msg_type: "interactive",
+              card: {
+                header: {
+                  title: { tag: "plain_text", content: "Apifox 同步失败" },
+                  template: "red"
+                },
+                elements: [
+                  {
+                    tag: "div",
+                    text: {
+                      tag: "lark_md",
+                      content: "**仓库**：\($repo)\n**分支**：\($ref)\n**提交**：\($sha | .[:8])\n**操作人**：\($actor)"
+                    }
+                  },
+                  {
+                    tag: "action",
+                    actions: [{
+                      tag: "button",
+                      text: { tag: "plain_text", content: "查看详情" },
+                      url: $url,
+                      type: "danger"
+                    }]
+                  }
+                ]
+              }
+            }')"
