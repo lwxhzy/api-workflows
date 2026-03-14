@@ -209,7 +209,6 @@ jobs:
             --arg ref "${{ github.ref_name }}" \
             --arg sha "${{ github.sha }}" \
             --arg actor "${{ github.actor }}" \
-            --arg url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             --arg summary "${{ steps.changes.outputs.summary }}" \
           '{
             msg_type: "interactive",
@@ -232,15 +231,6 @@ jobs:
                     tag: "lark_md",
                     content: "```\n\($summary)\n```"
                   }
-                },
-                {
-                  tag: "action",
-                  actions: [{
-                    tag: "button",
-                    text: { tag: "plain_text", content: "\u67e5\u770b\u8be6\u60c5" },
-                    url: $url,
-                    type: "primary"
-                  }]
                 }
               ]
             }
@@ -304,17 +294,8 @@ jobs:
                   tag: "div",
                   text: {
                     tag: "lark_md",
-                    content: "**\u4ed3\u5e93**\uff1a\($repo)\n**\u5206\u652f**\uff1a\($ref)\u3000**\u63d0\u4ea4**\uff1a\($sha | .[:8])\u3000**\u64cd\u4f5c\u4eba**\uff1a\($actor)"
+                    content: "**\u4ed3\u5e93**\uff1a\($repo)\n**\u5206\u652f**\uff1a\($ref)\u3000**\u63d0\u4ea4**\uff1a\($sha | .[:8])\u3000**\u64cd\u4f5c\u4eba**\uff1a\($actor)\n\n\u8bf7\u67e5\u770b CI \u65e5\u5fd7\uff1a[Actions](\($url))"
                   }
-                },
-                {
-                  tag: "action",
-                  actions: [{
-                    tag: "button",
-                    text: { tag: "plain_text", content: "\u67e5\u770b\u8be6\u60c5" },
-                    url: $url,
-                    type: "danger"
-                  }]
                 }
               ]
             }
