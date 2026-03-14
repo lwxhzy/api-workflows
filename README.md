@@ -7,6 +7,8 @@
 业务项目只需添加一个约 30 行的 YAML 文件 + 配置 Secrets。
 
 > **编码规范**：接入前务必阅读 [CONVENTIONS.md](./CONVENTIONS.md)，它定义了代码中如何编写描述、示例、错误响应等，确保同步到 Apifox 的文档完整可用。
+>
+> **AI 自动执行**：将 [api-conventions.md](./api-conventions.md) 复制到项目的 `.claude/` 目录下，并在 CLAUDE.md 中添加一行引用，AI 写代码时会自动遵循规范。
 
 ## 功能概览
 
