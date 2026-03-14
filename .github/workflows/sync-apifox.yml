@@ -104,7 +104,7 @@ jobs:
               msg_type: "interactive",
               card: {
                 header: {
-                  title: { tag: "plain_text", content: "Apifox 同步成功" },
+                  title: { tag: "plain_text", content: "Apifox \u540c\u6b65\u6210\u529f" },
                   template: "green"
                 },
                 elements: [
@@ -112,14 +112,14 @@ jobs:
                     tag: "div",
                     text: {
                       tag: "lark_md",
-                      content: "**仓库**：\($repo)\n**分支**：\($ref)\n**提交**：\($sha | .[:8])\n**操作人**：\($actor)"
+                      content: "**\u4ed3\u5e93**\uff1a\($repo)\n**\u5206\u652f**\uff1a\($ref)\n**\u63d0\u4ea4**\uff1a\($sha | .[:8])\n**\u64cd\u4f5c\u4eba**\uff1a\($actor)"
                     }
                   },
                   {
                     tag: "action",
                     actions: [{
                       tag: "button",
-                      text: { tag: "plain_text", content: "查看详情" },
+                      text: { tag: "plain_text", content: "\u67e5\u770b\u8be6\u60c5" },
                       url: $url,
                       type: "primary"
                     }]
@@ -145,7 +145,7 @@ jobs:
               msg_type: "interactive",
               card: {
                 header: {
-                  title: { tag: "plain_text", content: "Apifox 同步失败" },
+                  title: { tag: "plain_text", content: "Apifox \u540c\u6b65\u5931\u8d25" },
                   template: "red"
                 },
                 elements: [
@@ -153,14 +153,14 @@ jobs:
                     tag: "div",
                     text: {
                       tag: "lark_md",
-                      content: "**仓库**：\($repo)\n**分支**：\($ref)\n**提交**：\($sha | .[:8])\n**操作人**：\($actor)"
+                      content: "**\u4ed3\u5e93**\uff1a\($repo)\n**\u5206\u652f**\uff1a\($ref)\n**\u63d0\u4ea4**\uff1a\($sha | .[:8])\n**\u64cd\u4f5c\u4eba**\uff1a\($actor)"
                     }
                   },
                   {
                     tag: "action",
                     actions: [{
                       tag: "button",
-                      text: { tag: "plain_text", content: "查看详情" },
+                      text: { tag: "plain_text", content: "\u67e5\u770b\u8be6\u60c5" },
                       url: $url,
                       type: "danger"
                     }]
