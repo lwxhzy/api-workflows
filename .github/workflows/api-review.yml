@@ -3,20 +3,14 @@ name: API Review (Reusable)
 on:
   workflow_call:
     inputs:
+      setup-command:
+        description: "Command to install project dependencies"
+        required: true
+        type: string
       export-command:
         description: "Command to export OpenAPI spec to openapi.json"
         required: true
         type: string
-      python-version:
-        description: "Python version"
-        required: false
-        type: string
-        default: "3.12"
-      requirements-file:
-        description: "Path to requirements.txt"
-        required: false
-        type: string
-        default: "requirements.txt"
       base-branch:
         description: "Base branch for diff comparison"
         required: false
@@ -33,14 +27,8 @@ jobs:
       - name: Checkout PR branch
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ inputs.python-version }}
-          cache: pip
-
       - name: Install dependencies
-        run: pip install -r ${{ inputs.requirements-file }}
+        run: ${{ inputs.setup-command }}
 
       # ── 导出 PR 分支 spec ──
       - name: Export revision spec
@@ -63,7 +51,7 @@ jobs:
         id: export-base
         working-directory: __base__
         run: |
-          pip install -r ${{ inputs.requirements-file }} 2>/dev/null || true
+          ${{ inputs.setup-command }} 2>/dev/null || true
           ${{ inputs.export-command }} || exit 1
           cp openapi.json $GITHUB_WORKSPACE/openapi-base.json
         continue-on-error: true

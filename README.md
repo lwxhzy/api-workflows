@@ -1,8 +1,10 @@
 # api-workflows
 
-可复用的 GitHub Actions 工作流，为 Python API 项目提供 **PR 审查** 和 **Apifox 自动同步** 能力。
+可复用的 GitHub Actions 工作流，为 API 项目提供 **PR 审查** 和 **Apifox 自动同步** 能力。
 
-业务项目只需添加一个约 30 行的 YAML 文件 + 配置 Secrets，即可接入全套 API CI 流水线。
+支持任意语言和框架（Python / Java / Go / TypeScript / ...），只要能导出 `openapi.json` 即可接入。
+
+业务项目只需添加一个约 30 行的 YAML 文件 + 配置 Secrets。
 
 ## 功能概览
 
@@ -24,15 +26,11 @@ on:
   pull_request:
     branches: [dev]          # 改成你的目标分支
     paths:
-      - "app/**"             # 改成你的 API 源码路径
-      - "main.py"
-      - "requirements.txt"
+      - "src/**"             # 改成你的 API 源码路径
   push:
-    branches: [dev]          # 同上
+    branches: [dev]
     paths:
-      - "app/**"
-      - "main.py"
-      - "requirements.txt"
+      - "src/**"
 
 permissions:
   contents: read
@@ -43,15 +41,17 @@ jobs:
     if: github.event_name == 'pull_request'
     uses: lwxhzy/api-workflows/.github/workflows/api-review.yml@main
     with:
-      export-command: "python scripts/export_openapi.py"   # 改成你的导出命令
-      base-branch: dev                                      # 改成你的目标分支
+      setup-command: "pip install -r requirements.txt"       # 改成你的安装命令
+      export-command: "python scripts/export_openapi.py"     # 改成你的导出命令
+      base-branch: dev
     secrets: inherit
 
   sync:
     if: github.event_name == 'push'
     uses: lwxhzy/api-workflows/.github/workflows/sync-apifox.yml@main
     with:
-      export-command: "python scripts/export_openapi.py"   # 同上
+      setup-command: "pip install -r requirements.txt"
+      export-command: "python scripts/export_openapi.py"
     secrets: inherit
 ```
 
@@ -70,37 +70,88 @@ jobs:
 
 你的项目需要有一个命令，能将 OpenAPI spec 导出为当前目录下的 `openapi.json` 文件。
 
-**FastAPI 示例** — 创建 `scripts/export_openapi.py`：
+## 各语言接入示例
+
+### Python (FastAPI)
+
+```yaml
+setup-command: "pip install -r requirements.txt"
+export-command: "python scripts/export_openapi.py"
+```
+
+创建 `scripts/export_openapi.py`：
 
 ```python
-import json
-import sys
+import json, sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
 from main import app
 
-def main():
-    output_path = sys.argv[1] if len(sys.argv) > 1 else "openapi.json"
-    spec = app.openapi()
-    Path(output_path).write_text(
-        json.dumps(spec, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-
-if __name__ == "__main__":
-    main()
+spec = app.openapi()
+Path(sys.argv[1] if len(sys.argv) > 1 else "openapi.json").write_text(
+    json.dumps(spec, ensure_ascii=False, indent=2), encoding="utf-8"
+)
 ```
 
-**其他框架**只要能生成 `openapi.json` 即可，例如：
+### Python (Django + drf-spectacular)
 
 ```yaml
-# Django + drf-spectacular
+setup-command: "pip install -r requirements.txt"
 export-command: "python manage.py spectacular --file openapi.json"
-
-# Flask + apispec
-export-command: "python scripts/export_spec.py"
 ```
+
+无需额外脚本，drf-spectacular 自带导出命令。
+
+### Java (Spring Boot + springdoc-openapi)
+
+```yaml
+setup-command: "mvn dependency:resolve -q -B"
+export-command: "mvn -q springdoc-openapi:generate"
+```
+
+在 `pom.xml` 中配置 springdoc-openapi-maven-plugin，输出路径设为 `openapi.json`。
+
+### Go (swag)
+
+```yaml
+setup-command: "go install github.com/swaggo/swag/cmd/swag@latest"
+export-command: "swag init -o . --outputTypes json && mv docs/swagger.json openapi.json"
+```
+
+### TypeScript (NestJS + @nestjs/swagger)
+
+```yaml
+setup-command: "npm ci"
+export-command: "npx ts-node scripts/export-openapi.ts"
+```
+
+创建 `scripts/export-openapi.ts`：
+
+```typescript
+import { NestFactory } from '@nestjs/core';
+import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import { AppModule } from '../src/app.module';
+import * as fs from 'fs';
+
+async function main() {
+  const app = await NestFactory.create(AppModule, { logger: false });
+  const config = new DocumentBuilder().setTitle('API').setVersion('1.0').build();
+  const doc = SwaggerModule.createDocument(app, config);
+  fs.writeFileSync('openapi.json', JSON.stringify(doc, null, 2));
+  await app.close();
+}
+main();
+```
+
+### TypeScript (Express + tsoa)
+
+```yaml
+setup-command: "npm ci"
+export-command: "npx tsoa spec"
+```
+
+在 `tsoa.json` 中配置 `outputDirectory` 和 `specFileBaseName`，确保输出为 `openapi.json`。
 
 ## Workflow 参数参考
 
@@ -110,9 +161,8 @@ PR 阶段自动审查 API 变更。
 
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
+| `setup-command` | string | 是 | — | 安装项目依赖的命令 |
 | `export-command` | string | 是 | — | 导出 OpenAPI spec 到 `openapi.json` 的命令 |
-| `python-version` | string | 否 | `3.12` | Python 版本 |
-| `requirements-file` | string | 否 | `requirements.txt` | 依赖文件路径 |
 | `base-branch` | string | 否 | `dev` | 用于 diff 对比的基准分支 |
 
 **审查流程：**
@@ -132,9 +182,8 @@ PR 阶段自动审查 API 变更。
 
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
+| `setup-command` | string | 是 | — | 安装项目依赖的命令 |
 | `export-command` | string | 是 | — | 导出 OpenAPI spec 到 `openapi.json` 的命令 |
-| `python-version` | string | 否 | `3.12` | Python 版本 |
-| `requirements-file` | string | 否 | `requirements.txt` | 依赖文件路径 |
 
 | Secret | 必填 | 说明 |
 |--------|------|------|
@@ -157,7 +206,7 @@ PR 阶段自动审查 API 变更。
 | 参数 | Query / Path / Header 参数的名称、类型、描述、默认值、校验规则 |
 | 请求体 | 字段结构、类型、是否必填、描述、示例值 |
 | 响应体 | 状态码、字段结构、类型、描述 |
-| 数据模型 | Pydantic / Schema 类的完整定义 |
+| 数据模型 | Schema 类的完整定义 |
 | 全局信息 | API 标题、描述、版本号 |
 
 ## 团队协作规范：代码为唯一事实来源
@@ -208,18 +257,17 @@ async def list_items(
     ...
 ```
 
+其他语言/框架的注解方式不同，但原理一致——在代码中标注 summary、description、example，同步后自动填充到 Apifox。
+
 ### 代码注释与 Apifox 的映射关系
 
-| 代码写法 | 同步到 Apifox | 位置 |
-|---------|--------------|------|
-| `Field(description="...")` | 字段备注 | Schema 字段说明 |
-| `Field(examples=[...])` | 示例值 | 字段示例 |
-| `Field(ge=, le=, max_length=, ...)` | 校验规则 | 字段约束 |
-| `summary="..."` | 接口名称 | 接口列表标题 |
-| `description="..."` (路由级) | 接口说明 | 接口详情顶部 |
-| `tags=["..."]` | 分组目录 | 左侧接口树 |
-| `Query(description="...")` | 参数备注 | 请求参数说明 |
-| `response_model=` | 响应结构 | 返回响应 Schema |
+| OpenAPI 字段 | 同步到 Apifox | 代码中怎么写（各语言） |
+|-------------|--------------|---------------------|
+| `summary` | 接口名称 | Python: `summary=` / Java: `@Operation(summary=)` / Go: `@Summary` / TS: `@ApiOperation({summary:})` |
+| `description` | 接口说明 | Python: `description=` / Java: `@Operation(description=)` / Go: `@Description` / TS: `@ApiOperation({description:})` |
+| `tags` | 分组目录 | Python: `tags=` / Java: `@Tag(name=)` / Go: `@Tags` / TS: `@ApiTags()` |
+| Schema `description` | 字段备注 | Python: `Field(description=)` / Java: `@Schema(description=)` / Go: `// field comment` / TS: `@ApiProperty({description:})` |
+| Schema `example` | 示例值 | Python: `Field(examples=)` / Java: `@Schema(example=)` / Go: `@Example` / TS: `@ApiProperty({example:})` |
 
 ### Apifox 里做什么
 

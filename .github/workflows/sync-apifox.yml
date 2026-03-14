@@ -3,20 +3,14 @@ name: Sync Apifox (Reusable)
 on:
   workflow_call:
     inputs:
+      setup-command:
+        description: "Command to install project dependencies"
+        required: true
+        type: string
       export-command:
         description: "Command to export OpenAPI spec to openapi.json"
         required: true
         type: string
-      python-version:
-        description: "Python version"
-        required: false
-        type: string
-        default: "3.12"
-      requirements-file:
-        description: "Path to requirements.txt"
-        required: false
-        type: string
-        default: "requirements.txt"
     secrets:
       APIFOX_ACCESS_TOKEN:
         required: true
@@ -30,14 +24,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ inputs.python-version }}
-          cache: pip
-
       - name: Install dependencies
-        run: pip install -r ${{ inputs.requirements-file }}
+        run: ${{ inputs.setup-command }}
 
       - name: Export OpenAPI spec
         run: ${{ inputs.export-command }}
