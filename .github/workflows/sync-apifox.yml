@@ -32,28 +32,129 @@ jobs:
       - name: Export OpenAPI spec
         run: ${{ inputs.export-command }}
 
-      # ── Spec 变更检测 ──
-      - name: Compute spec hash
-        id: spec-hash
-        run: |
-          HASH=$(sha256sum openapi.json | cut -d' ' -f1)
-          echo "hash=$HASH" >> "$GITHUB_OUTPUT"
-          echo "Spec hash: $HASH"
-
-      - name: Check cache
-        id: cache
-        uses: actions/cache@v4
+      # ── 恢复上次同步的 spec，用于对比 ──
+      - name: Restore previous spec
+        id: prev
+        uses: actions/cache/restore@v4
         with:
-          path: .spec-hash-marker
-          key: apifox-spec-${{ steps.spec-hash.outputs.hash }}
+          path: .apifox-cache/openapi-previous.json
+          key: apifox-spec-never-match
+          restore-keys: apifox-spec-
 
-      - name: Spec unchanged
-        if: steps.cache.outputs.cache-hit == 'true'
-        run: echo "OpenAPI spec unchanged, skipping sync"
+      # ── 分析变更 ──
+      - name: Analyze changes
+        id: changes
+        run: |
+          mkdir -p .apifox-cache
+
+          NEW_HASH=$(sha256sum openapi.json | cut -d' ' -f1)
+          echo "hash=$NEW_HASH" >> "$GITHUB_OUTPUT"
+
+          TOTAL_ENDPOINTS=$(jq '[.paths[] | keys[] | select(. != "parameters")] | length' openapi.json)
+          TOTAL_PATHS=$(jq '.paths | length' openapi.json)
+          TITLE=$(jq -r '.info.title' openapi.json)
+          VERSION=$(jq -r '.info.version' openapi.json)
+
+          if [ ! -f .apifox-cache/openapi-previous.json ]; then
+            echo "status=initial" >> "$GITHUB_OUTPUT"
+
+            {
+              echo "summary<<SUMMARY_EOF"
+              echo "$TITLE v$VERSION"
+              echo ""
+              echo "Initial sync: $TOTAL_ENDPOINTS endpoints across $TOTAL_PATHS paths"
+              echo ""
+              echo "Paths:"
+              jq -r '.paths | keys[]' openapi.json | while read p; do
+                METHODS=$(jq -r --arg p "$p" '.paths[$p] | keys[] | select(. != "parameters") | ascii_upcase' openapi.json | tr '\n' ' ')
+                echo "  + $p [$METHODS]"
+              done
+              echo "SUMMARY_EOF"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          OLD_HASH=$(sha256sum .apifox-cache/openapi-previous.json | cut -d' ' -f1)
+
+          if [ "$NEW_HASH" = "$OLD_HASH" ]; then
+            echo "status=unchanged" >> "$GITHUB_OUTPUT"
+            OLD_VERSION=$(jq -r '.info.version' .apifox-cache/openapi-previous.json)
+            {
+              echo "summary<<SUMMARY_EOF"
+              echo "$TITLE v$OLD_VERSION"
+              echo ""
+              echo "Spec unchanged, sync skipped"
+              echo "Endpoints: $TOTAL_ENDPOINTS | Paths: $TOTAL_PATHS"
+              echo "SUMMARY_EOF"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "status=changed" >> "$GITHUB_OUTPUT"
+
+          jq -r '.paths | keys[]' openapi.json | sort > /tmp/new_paths.txt
+          jq -r '.paths | keys[]' .apifox-cache/openapi-previous.json | sort > /tmp/old_paths.txt
+
+          OLD_ENDPOINTS=$(jq '[.paths[] | keys[] | select(. != "parameters")] | length' .apifox-cache/openapi-previous.json)
+          OLD_VERSION=$(jq -r '.info.version' .apifox-cache/openapi-previous.json)
+
+          ADDED_PATHS=$(comm -13 /tmp/old_paths.txt /tmp/new_paths.txt)
+          REMOVED_PATHS=$(comm -23 /tmp/old_paths.txt /tmp/new_paths.txt)
+          ADDED_COUNT=$(echo "$ADDED_PATHS" | grep -c . || true)
+          REMOVED_COUNT=$(echo "$REMOVED_PATHS" | grep -c . || true)
+
+          {
+            echo "summary<<SUMMARY_EOF"
+            echo "$TITLE v$OLD_VERSION -> v$VERSION"
+            echo ""
+            echo "Endpoints: $OLD_ENDPOINTS -> $TOTAL_ENDPOINTS | Paths: $(wc -l < /tmp/old_paths.txt | tr -d ' ') -> $TOTAL_PATHS"
+
+            if [ -n "$ADDED_PATHS" ] && [ "$ADDED_COUNT" -gt 0 ]; then
+              echo ""
+              echo "New paths (+$ADDED_COUNT):"
+              echo "$ADDED_PATHS" | while read p; do
+                METHODS=$(jq -r --arg p "$p" '.paths[$p] | keys[] | select(. != "parameters") | ascii_upcase' openapi.json | tr '\n' ' ')
+                echo "  + $p [$METHODS]"
+              done
+            fi
+
+            if [ -n "$REMOVED_PATHS" ] && [ "$REMOVED_COUNT" -gt 0 ]; then
+              echo ""
+              echo "Removed paths (-$REMOVED_COUNT):"
+              echo "$REMOVED_PATHS" | while read p; do
+                echo "  - $p"
+              done
+            fi
+
+            COMMON_PATHS=$(comm -12 /tmp/old_paths.txt /tmp/new_paths.txt)
+            MODIFIED=""
+            if [ -n "$COMMON_PATHS" ]; then
+              while read p; do
+                OLD_METHODS=$(jq -r --arg p "$p" '.paths[$p] | keys[] | select(. != "parameters")' .apifox-cache/openapi-previous.json | sort | tr '\n' ',')
+                NEW_METHODS=$(jq -r --arg p "$p" '.paths[$p] | keys[] | select(. != "parameters")' openapi.json | sort | tr '\n' ',')
+                if [ "$OLD_METHODS" != "$NEW_METHODS" ]; then
+                  MODIFIED="$MODIFIED\n  ~ $p [$(echo $NEW_METHODS | tr ',' ' ' | xargs -n1 | tr '[:lower:]' '[:upper:]' | tr '\n' ' ')]"
+                fi
+              done <<< "$COMMON_PATHS"
+            fi
+
+            if [ -n "$MODIFIED" ]; then
+              echo ""
+              echo "Modified paths:"
+              echo -e "$MODIFIED"
+            fi
+
+            if [ "$ADDED_COUNT" -eq 0 ] && [ "$REMOVED_COUNT" -eq 0 ] && [ -z "$MODIFIED" ]; then
+              echo ""
+              echo "Changes: field descriptions, examples, or schema updates"
+            fi
+
+            echo "SUMMARY_EOF"
+          } >> "$GITHUB_OUTPUT"
 
       # ── 同步到 Apifox ──
       - name: Sync to Apifox
-        if: steps.cache.outputs.cache-hit != 'true'
+        if: steps.changes.outputs.status != 'unchanged'
         run: |
           RESPONSE=$(jq -n --arg spec "$(cat openapi.json)" '{
             input: $spec,
@@ -83,88 +184,140 @@ jobs:
             exit 1
           fi
 
-          echo "${{ steps.spec-hash.outputs.hash }}" > .spec-hash-marker
           echo "Sync completed successfully"
 
-      # ── 飞书通知 ──
-      - name: Notify Feishu (success)
-        if: success() && steps.cache.outputs.cache-hit != 'true' && env.FEISHU_WEBHOOK != ''
+      # ── 缓存当前 spec 供下次对比 ──
+      - name: Save spec for next comparison
+        if: steps.changes.outputs.status != 'unchanged'
+        run: cp openapi.json .apifox-cache/openapi-previous.json
+
+      - name: Update cache
+        if: steps.changes.outputs.status != 'unchanged'
+        uses: actions/cache/save@v4
+        with:
+          path: .apifox-cache/openapi-previous.json
+          key: apifox-spec-${{ steps.changes.outputs.hash }}
+
+      # ── 飞书通知：同步成功 ──
+      - name: Notify Feishu (synced)
+        if: success() && steps.changes.outputs.status != 'unchanged' && env.FEISHU_WEBHOOK != ''
         env:
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
         run: |
-          curl -s -X POST "$FEISHU_WEBHOOK" \
-            -H "Content-Type: application/json" \
-            -d "$(jq -n \
-              --arg repo "${{ github.repository }}" \
-              --arg ref "${{ github.ref_name }}" \
-              --arg sha "${{ github.sha }}" \
-              --arg actor "${{ github.actor }}" \
-              --arg url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-            '{
-              msg_type: "interactive",
-              card: {
-                header: {
-                  title: { tag: "plain_text", content: "Apifox \u540c\u6b65\u6210\u529f" },
-                  template: "green"
-                },
-                elements: [
-                  {
-                    tag: "div",
-                    text: {
-                      tag: "lark_md",
-                      content: "**\u4ed3\u5e93**\uff1a\($repo)\n**\u5206\u652f**\uff1a\($ref)\n**\u63d0\u4ea4**\uff1a\($sha | .[:8])\n**\u64cd\u4f5c\u4eba**\uff1a\($actor)"
-                    }
-                  },
-                  {
-                    tag: "action",
-                    actions: [{
-                      tag: "button",
-                      text: { tag: "plain_text", content: "\u67e5\u770b\u8be6\u60c5" },
-                      url: $url,
-                      type: "primary"
-                    }]
+          jq -n \
+            --arg repo "${{ github.repository }}" \
+            --arg ref "${{ github.ref_name }}" \
+            --arg sha "${{ github.sha }}" \
+            --arg actor "${{ github.actor }}" \
+            --arg url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --arg summary "${{ steps.changes.outputs.summary }}" \
+          '{
+            msg_type: "interactive",
+            card: {
+              header: {
+                title: { tag: "plain_text", content: "Apifox \u540c\u6b65\u6210\u529f" },
+                template: "green"
+              },
+              elements: [
+                {
+                  tag: "div",
+                  text: {
+                    tag: "lark_md",
+                    content: "**\u4ed3\u5e93**\uff1a\($repo)\n**\u5206\u652f**\uff1a\($ref)\u3000**\u63d0\u4ea4**\uff1a\($sha | .[:8])\u3000**\u64cd\u4f5c\u4eba**\uff1a\($actor)"
                   }
-                ]
-              }
-            }')"
+                },
+                {
+                  tag: "div",
+                  text: {
+                    tag: "lark_md",
+                    content: "```\n\($summary)\n```"
+                  }
+                },
+                {
+                  tag: "action",
+                  actions: [{
+                    tag: "button",
+                    text: { tag: "plain_text", content: "\u67e5\u770b\u8be6\u60c5" },
+                    url: $url,
+                    type: "primary"
+                  }]
+                }
+              ]
+            }
+          }' | curl -s -X POST "$FEISHU_WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d @-
 
+      # ── 飞书通知：无变化 ──
+      - name: Notify Feishu (unchanged)
+        if: success() && steps.changes.outputs.status == 'unchanged' && env.FEISHU_WEBHOOK != ''
+        env:
+          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+        run: |
+          jq -n \
+            --arg repo "${{ github.repository }}" \
+            --arg ref "${{ github.ref_name }}" \
+            --arg sha "${{ github.sha }}" \
+            --arg summary "${{ steps.changes.outputs.summary }}" \
+          '{
+            msg_type: "interactive",
+            card: {
+              header: {
+                title: { tag: "plain_text", content: "Apifox \u540c\u6b65\u8df3\u8fc7" },
+                template: "wathet"
+              },
+              elements: [
+                {
+                  tag: "div",
+                  text: {
+                    tag: "lark_md",
+                    content: "**\u4ed3\u5e93**\uff1a\($repo)\u3000**\u5206\u652f**\uff1a\($ref)\n\n\($summary)"
+                  }
+                }
+              ]
+            }
+          }' | curl -s -X POST "$FEISHU_WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d @-
+
+      # ── 飞书通知：失败 ──
       - name: Notify Feishu (failure)
         if: failure() && env.FEISHU_WEBHOOK != ''
         env:
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
         run: |
-          curl -s -X POST "$FEISHU_WEBHOOK" \
-            -H "Content-Type: application/json" \
-            -d "$(jq -n \
-              --arg repo "${{ github.repository }}" \
-              --arg ref "${{ github.ref_name }}" \
-              --arg sha "${{ github.sha }}" \
-              --arg actor "${{ github.actor }}" \
-              --arg url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-            '{
-              msg_type: "interactive",
-              card: {
-                header: {
-                  title: { tag: "plain_text", content: "Apifox \u540c\u6b65\u5931\u8d25" },
-                  template: "red"
-                },
-                elements: [
-                  {
-                    tag: "div",
-                    text: {
-                      tag: "lark_md",
-                      content: "**\u4ed3\u5e93**\uff1a\($repo)\n**\u5206\u652f**\uff1a\($ref)\n**\u63d0\u4ea4**\uff1a\($sha | .[:8])\n**\u64cd\u4f5c\u4eba**\uff1a\($actor)"
-                    }
-                  },
-                  {
-                    tag: "action",
-                    actions: [{
-                      tag: "button",
-                      text: { tag: "plain_text", content: "\u67e5\u770b\u8be6\u60c5" },
-                      url: $url,
-                      type: "danger"
-                    }]
+          jq -n \
+            --arg repo "${{ github.repository }}" \
+            --arg ref "${{ github.ref_name }}" \
+            --arg sha "${{ github.sha }}" \
+            --arg actor "${{ github.actor }}" \
+            --arg url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+          '{
+            msg_type: "interactive",
+            card: {
+              header: {
+                title: { tag: "plain_text", content: "Apifox \u540c\u6b65\u5931\u8d25" },
+                template: "red"
+              },
+              elements: [
+                {
+                  tag: "div",
+                  text: {
+                    tag: "lark_md",
+                    content: "**\u4ed3\u5e93**\uff1a\($repo)\n**\u5206\u652f**\uff1a\($ref)\u3000**\u63d0\u4ea4**\uff1a\($sha | .[:8])\u3000**\u64cd\u4f5c\u4eba**\uff1a\($actor)"
                   }
-                ]
-              }
-            }')"
+                },
+                {
+                  tag: "action",
+                  actions: [{
+                    tag: "button",
+                    text: { tag: "plain_text", content: "\u67e5\u770b\u8be6\u60c5" },
+                    url: $url,
+                    type: "danger"
+                  }]
+                }
+              ]
+            }
+          }' | curl -s -X POST "$FEISHU_WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d @-
