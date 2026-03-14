@@ -62,9 +62,9 @@ jobs:
               echo "summary<<SUMMARY_EOF"
               echo "$TITLE v$VERSION"
               echo ""
-              echo "Initial sync: $TOTAL_ENDPOINTS endpoints across $TOTAL_PATHS paths"
+              echo "首次同步：共 $TOTAL_ENDPOINTS 个接口，$TOTAL_PATHS 个路径"
               echo ""
-              echo "Paths:"
+              echo "接口列表："
               jq -r '.paths | keys[]' openapi.json | while read p; do
                 METHODS=$(jq -r --arg p "$p" '.paths[$p] | keys[] | select(. != "parameters") | ascii_upcase' openapi.json | tr '\n' ' ')
                 echo "  + $p [$METHODS]"
@@ -83,8 +83,8 @@ jobs:
               echo "summary<<SUMMARY_EOF"
               echo "$TITLE v$OLD_VERSION"
               echo ""
-              echo "Spec unchanged, sync skipped"
-              echo "Endpoints: $TOTAL_ENDPOINTS | Paths: $TOTAL_PATHS"
+              echo "接口无变化，已跳过同步"
+              echo "接口数：$TOTAL_ENDPOINTS | 路径数：$TOTAL_PATHS"
               echo "SUMMARY_EOF"
             } >> "$GITHUB_OUTPUT"
             exit 0
@@ -105,13 +105,13 @@ jobs:
 
           {
             echo "summary<<SUMMARY_EOF"
-            echo "$TITLE v$OLD_VERSION -> v$VERSION"
+            echo "$TITLE v$OLD_VERSION → v$VERSION"
             echo ""
-            echo "Endpoints: $OLD_ENDPOINTS -> $TOTAL_ENDPOINTS | Paths: $(wc -l < /tmp/old_paths.txt | tr -d ' ') -> $TOTAL_PATHS"
+            echo "接口数：$OLD_ENDPOINTS → $TOTAL_ENDPOINTS | 路径数：$(wc -l < /tmp/old_paths.txt | tr -d ' ') → $TOTAL_PATHS"
 
             if [ -n "$ADDED_PATHS" ] && [ "$ADDED_COUNT" -gt 0 ]; then
               echo ""
-              echo "New paths (+$ADDED_COUNT):"
+              echo "新增路径（+$ADDED_COUNT）："
               echo "$ADDED_PATHS" | while read p; do
                 METHODS=$(jq -r --arg p "$p" '.paths[$p] | keys[] | select(. != "parameters") | ascii_upcase' openapi.json | tr '\n' ' ')
                 echo "  + $p [$METHODS]"
@@ -120,7 +120,7 @@ jobs:
 
             if [ -n "$REMOVED_PATHS" ] && [ "$REMOVED_COUNT" -gt 0 ]; then
               echo ""
-              echo "Removed paths (-$REMOVED_COUNT):"
+              echo "删除路径（-$REMOVED_COUNT）："
               echo "$REMOVED_PATHS" | while read p; do
                 echo "  - $p"
               done
@@ -140,13 +140,13 @@ jobs:
 
             if [ -n "$MODIFIED" ]; then
               echo ""
-              echo "Modified paths:"
+              echo "变更路径："
               echo -e "$MODIFIED"
             fi
 
             if [ "$ADDED_COUNT" -eq 0 ] && [ "$REMOVED_COUNT" -eq 0 ] && [ -z "$MODIFIED" ]; then
               echo ""
-              echo "Changes: field descriptions, examples, or schema updates"
+              echo "变更内容：字段描述、示例值或 Schema 结构更新"
             fi
 
             echo "SUMMARY_EOF"
