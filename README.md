@@ -160,6 +160,82 @@ PR 阶段自动审查 API 变更。
 | 数据模型 | Pydantic / Schema 类的完整定义 |
 | 全局信息 | API 标题、描述、版本号 |
 
+## 团队协作规范：代码为唯一事实来源
+
+本 workflow 采用 **代码为准（Code-First）** 策略：所有 API 的描述、注释、示例值都在代码中维护，同步时覆盖 Apifox 中的对应内容。
+
+### 为什么
+
+- 描述跟着代码走，PR 审查时可以一起 review
+- 不会出现"代码改了但文档没更新"的问题
+- 多人协作时不会互相覆盖——代码有 git 合并机制，Apifox 没有
+
+### 在代码里写什么
+
+以 FastAPI + Pydantic 为例：
+
+```python
+# schemas.py — 字段级别的描述、示例、校验规则
+class ItemCreate(BaseModel):
+    name: str = Field(
+        ...,
+        description="物品名称，不超过 50 个字符",   # → Apifox 字段备注
+        examples=["苹果"],                          # → Apifox 示例值
+        max_length=50,                              # → Apifox 校验规则
+    )
+    price: float = Field(
+        ...,
+        description="价格，单位：元",
+        ge=0,
+        examples=[9.99],
+    )
+
+
+# views.py — 接口级别的名称、说明、分组
+@router.get(
+    "/items",
+    summary="获取物品列表",                          # → Apifox 接口名称
+    description="分页查询物品列表，支持按名称搜索",     # → Apifox 接口说明
+    tags=["物品管理"],                                # → Apifox 目录分组
+    response_model=ItemListResponse,
+)
+async def list_items(
+    keyword: Optional[str] = Query(
+        None,
+        description="搜索关键词，模糊匹配物品名称",    # → Apifox 参数备注
+    ),
+):
+    ...
+```
+
+### 代码注释与 Apifox 的映射关系
+
+| 代码写法 | 同步到 Apifox | 位置 |
+|---------|--------------|------|
+| `Field(description="...")` | 字段备注 | Schema 字段说明 |
+| `Field(examples=[...])` | 示例值 | 字段示例 |
+| `Field(ge=, le=, max_length=, ...)` | 校验规则 | 字段约束 |
+| `summary="..."` | 接口名称 | 接口列表标题 |
+| `description="..."` (路由级) | 接口说明 | 接口详情顶部 |
+| `tags=["..."]` | 分组目录 | 左侧接口树 |
+| `Query(description="...")` | 参数备注 | 请求参数说明 |
+| `response_model=` | 响应结构 | 返回响应 Schema |
+
+### Apifox 里做什么
+
+同步**不会影响**以下 Apifox 独有功能，可以放心在 Apifox 中维护：
+
+- Mock 规则（自定义返回数据）
+- 测试用例（接口自动化测试）
+- 环境配置（开发 / 测试 / 生产环境变量）
+- 前后置脚本
+- 接口运行历史
+
+### 不要做的事
+
+- 不要在 Apifox 中手动修改接口的描述、参数说明、字段备注——下次同步会被代码覆盖
+- 不要在 Apifox 中手动添加新接口——应该在代码中添加路由，通过同步自动创建
+
 ## 完整接入示例
 
 可参考 [lwxhzy/test-apifox](https://github.com/lwxhzy/test-apifox) 项目，它是一个使用本 workflow 的 FastAPI 示例。
