@@ -1,0 +1,128 @@
+name: API Review (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      export-command:
+        description: "Command to export OpenAPI spec to openapi.json"
+        required: true
+        type: string
+      python-version:
+        description: "Python version"
+        required: false
+        type: string
+        default: "3.12"
+      requirements-file:
+        description: "Path to requirements.txt"
+        required: false
+        type: string
+        default: "requirements.txt"
+      base-branch:
+        description: "Base branch for diff comparison"
+        required: false
+        type: string
+        default: "dev"
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r ${{ inputs.requirements-file }}
+
+      # ── 导出 PR 分支 spec ──
+      - name: Export revision spec
+        run: |
+          ${{ inputs.export-command }}
+          cp openapi.json openapi-revision.json
+
+      # ── 导出基准分支 spec ──
+      - name: Checkout base branch
+        id: checkout-base
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.base-branch }}
+          path: __base__
+          fetch-depth: 1
+        continue-on-error: true
+
+      - name: Export base spec
+        if: steps.checkout-base.outcome == 'success'
+        id: export-base
+        working-directory: __base__
+        run: |
+          pip install -r ${{ inputs.requirements-file }} 2>/dev/null || true
+          ${{ inputs.export-command }} || exit 1
+          cp openapi.json $GITHUB_WORKSPACE/openapi-base.json
+        continue-on-error: true
+
+      # ── Spectral Lint ──
+      - name: Spectral lint
+        uses: stoplightio/spectral-action@latest
+        with:
+          file_glob: openapi-revision.json
+
+      # ── 破坏性变更检测 ──
+      - name: Check breaking changes
+        if: steps.export-base.outcome == 'success'
+        uses: oasdiff/oasdiff-action/breaking@main
+        with:
+          base: openapi-base.json
+          revision: openapi-revision.json
+
+      # ── 变更日志 ──
+      - name: Generate changelog
+        if: steps.export-base.outcome == 'success'
+        id: changelog
+        uses: oasdiff/oasdiff-action/changelog@main
+        with:
+          base: openapi-base.json
+          revision: openapi-revision.json
+
+      # ── PR 评论：有基准 ──
+      - name: Comment PR with API changes
+        if: steps.export-base.outcome == 'success'
+        uses: mshick/add-pr-comment@v2
+        with:
+          message-id: api-review
+          message: |
+            ## API Review
+
+            ### Spectral Lint
+            Passed
+
+            ### API Changes
+            ```
+            ${{ steps.changelog.outputs.changelog }}
+            ```
+
+            > CI auto-generated, updated on each push.
+
+      # ── PR 评论：无基准 ──
+      - name: Comment PR (initial API)
+        if: steps.export-base.outcome != 'success'
+        uses: mshick/add-pr-comment@v2
+        with:
+          message-id: api-review
+          message: |
+            ## API Review
+
+            ### Spectral Lint
+            Passed
+
+            ### API Changes
+            Initial API definition — no baseline to compare. Will serve as baseline for future PRs after merge.
+
+            > CI auto-generated, updated on each push.

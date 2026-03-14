@@ -1,0 +1,75 @@
+name: Sync Apifox (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      export-command:
+        description: "Command to export OpenAPI spec to openapi.json"
+        required: true
+        type: string
+      python-version:
+        description: "Python version"
+        required: false
+        type: string
+        default: "3.12"
+      requirements-file:
+        description: "Path to requirements.txt"
+        required: false
+        type: string
+        default: "requirements.txt"
+    secrets:
+      APIFOX_ACCESS_TOKEN:
+        required: true
+      APIFOX_PROJECT_ID:
+        required: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r ${{ inputs.requirements-file }}
+
+      - name: Export OpenAPI spec
+        run: ${{ inputs.export-command }}
+
+      - name: Sync to Apifox
+        run: |
+          RESPONSE=$(jq -n --arg spec "$(cat openapi.json)" '{
+            input: $spec,
+            options: {
+              targetEndpointFolderId: 0,
+              targetSchemaFolderId: 0,
+              endpointOverwriteBehavior: "OVERWRITE_EXISTING",
+              schemaOverwriteBehavior: "OVERWRITE_EXISTING",
+              updateFolderOfChangedEndpoint: true,
+              prependBasePath: false
+            }
+          }' | curl -s -w "\n%{http_code}" -X POST \
+            "https://api.apifox.com/v1/projects/${{ secrets.APIFOX_PROJECT_ID }}/import-openapi" \
+            -H "X-Apifox-Api-Version: 2024-03-28" \
+            -H "Authorization: Bearer ${{ secrets.APIFOX_ACCESS_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d @-)
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          echo "HTTP Status: $HTTP_CODE"
+          echo "Response: $BODY"
+
+          if [ "$HTTP_CODE" -ge 400 ]; then
+            echo "::error::Apifox sync failed with HTTP $HTTP_CODE: $BODY"
+            exit 1
+          fi
+
+          echo "Sync completed successfully"
