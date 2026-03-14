@@ -15,7 +15,7 @@
 | 触发时机 | Workflow | 做什么 |
 |---------|----------|--------|
 | PR → 目标分支 | `api-review.yml` | Spectral lint 质量校验 → oasdiff 破坏性变更检测 → PR 评论展示变更摘要 |
-| PR 合并到目标分支 | `sync-apifox.yml` | 导出 OpenAPI spec → 若 spec 有变化则同步到 Apifox（无变化则跳过） |
+| Push / PR 合并到目标分支 | `sync-apifox.yml` | 导出 OpenAPI spec → 若 spec 有变化则同步到 Apifox（无变化则跳过） → 可选飞书通知 |
 
 ## 快速接入（3 步）
 
@@ -32,6 +32,10 @@ on:
     branches: [dev]          # 改成你的目标分支
     paths:
       - "src/**"             # 改成你的 API 源码路径
+  push:
+    branches: [dev]
+    paths:
+      - "src/**"
 
 permissions:
   contents: read
@@ -39,7 +43,7 @@ permissions:
 
 jobs:
   review:
-    if: github.event.action != 'closed'
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
     uses: lwxhzy/api-workflows/.github/workflows/api-review.yml@main
     with:
       setup-command: "pip install -r requirements.txt"       # 改成你的安装命令
@@ -48,7 +52,9 @@ jobs:
     secrets: inherit
 
   sync:
-    if: github.event.pull_request.merged == true
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
     uses: lwxhzy/api-workflows/.github/workflows/sync-apifox.yml@main
     with:
       setup-command: "pip install -r requirements.txt"
@@ -60,12 +66,34 @@ jobs:
 
 进入仓库 **Settings → Secrets and variables → Actions**，添加：
 
-| Secret 名称 | 说明 | 获取方式 |
-|-------------|------|---------|
-| `APIFOX_ACCESS_TOKEN` | Apifox API 访问令牌 | Apifox → 头像 → 账号设置 → API 访问令牌 → 新建 |
-| `APIFOX_PROJECT_ID` | Apifox 项目 ID | Apifox → 项目设置 → 基本设置 → 项目 ID |
+| Secret 名称 | 必填 | 说明 | 获取方式 |
+|-------------|------|------|---------|
+| `APIFOX_ACCESS_TOKEN` | 是 | Apifox API 访问令牌 | Apifox → 头像 → 账号设置 → API 访问令牌 → 新建 |
+| `APIFOX_PROJECT_ID` | 是 | Apifox 项目 ID | Apifox → 项目设置 → 基本设置 → 项目 ID |
+| `FEISHU_WEBHOOK` | 否 | 飞书机器人 Webhook URL | 见下方说明 |
 
 > 如果使用 GitHub Organization，`APIFOX_ACCESS_TOKEN` 可以设为 Organization 级别的 Secret，所有仓库共享，只需配一次。
+
+#### 飞书通知配置（可选）
+
+配置后，同步成功会收到绿色卡片通知，失败会收到红色卡片通知。不配置则静默，不影响同步。
+
+**获取 Webhook URL：**
+
+1. 打开飞书，进入要接收通知的群聊
+2. 点击右上角 **「...」** → **「群机器人」** → **「添加机器人」**
+3. 选择 **「自定义机器人」**
+4. 填写名称（如 "API 同步通知"），点击 **「添加」**
+5. 复制生成的 **Webhook 地址**（格式：`https://open.feishu.cn/open-apis/bot/v2/hook/xxx`）
+6. 将该地址添加到仓库的 GitHub Secrets，名称为 `FEISHU_WEBHOOK`
+
+**通知效果：**
+
+| 场景 | 卡片颜色 | 内容 |
+|------|---------|------|
+| 同步成功 | 绿色 | 仓库、分支、提交哈希、操作人 + 「查看详情」按钮 |
+| 同步失败 | 红色 | 同上 |
+| Spec 无变化（跳过同步） | 不通知 | — |
 
 ### 3. 确保项目有导出命令
 
