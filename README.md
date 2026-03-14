@@ -6,6 +6,8 @@
 
 业务项目只需添加一个约 30 行的 YAML 文件 + 配置 Secrets。
 
+> **编码规范**：接入前务必阅读 [CONVENTIONS.md](./CONVENTIONS.md)，它定义了代码中如何编写描述、示例、错误响应等，确保同步到 Apifox 的文档完整可用。
+
 ## 功能概览
 
 | 触发时机 | Workflow | 做什么 |
