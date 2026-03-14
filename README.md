@@ -15,7 +15,7 @@
 | 触发时机 | Workflow | 做什么 |
 |---------|----------|--------|
 | PR → 目标分支 | `api-review.yml` | Spectral lint 质量校验 → oasdiff 破坏性变更检测 → PR 评论展示变更摘要 |
-| 合并/推送 → 目标分支 | `sync-apifox.yml` | 导出 OpenAPI spec → 调用 Apifox API 自动同步接口文档 |
+| PR 合并到目标分支 | `sync-apifox.yml` | 导出 OpenAPI spec → 若 spec 有变化则同步到 Apifox（无变化则跳过） |
 
 ## 快速接入（3 步）
 
@@ -28,13 +28,10 @@ name: API CI
 
 on:
   pull_request:
+    types: [opened, synchronize, closed]
     branches: [dev]          # 改成你的目标分支
     paths:
       - "src/**"             # 改成你的 API 源码路径
-  push:
-    branches: [dev]
-    paths:
-      - "src/**"
 
 permissions:
   contents: read
@@ -42,7 +39,7 @@ permissions:
 
 jobs:
   review:
-    if: github.event_name == 'pull_request'
+    if: github.event.action != 'closed'
     uses: lwxhzy/api-workflows/.github/workflows/api-review.yml@main
     with:
       setup-command: "pip install -r requirements.txt"       # 改成你的安装命令
@@ -51,7 +48,7 @@ jobs:
     secrets: inherit
 
   sync:
-    if: github.event_name == 'push'
+    if: github.event.pull_request.merged == true
     uses: lwxhzy/api-workflows/.github/workflows/sync-apifox.yml@main
     with:
       setup-command: "pip install -r requirements.txt"
